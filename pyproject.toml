@@ -1,5 +1,5 @@
 [project]
-name = "freecad-engineering-mcp"
+name = "cad_mcp"
 version = "0.1.0"
 description = "A FreeCAD engineering MCP server: CAD modelling, mass/interference/FEM checks, drawings, BOM and renders over stdio."
 requires-python = ">=3.10"

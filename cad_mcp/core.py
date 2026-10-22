@@ -10,7 +10,7 @@ import FreeCAD as App
 import Part
 from FreeCAD import Vector as V
 
-from freecad_worker.materials import get_material
+from cad_mcp.materials import get_material
 
 OPS = {}
 
@@ -213,4 +213,4 @@ def main():
     sys.stdout.flush()
 
 # operation modules register themselves on import
-from freecad_worker import ops_model, ops_analysis  # noqa: E402,F401
+from cad_mcp import ops_model, ops_analysis, ops_fem  # noqa: E402,F401

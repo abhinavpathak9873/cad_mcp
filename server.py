@@ -14,7 +14,7 @@ to with JSON-RPC 2.0 messages over stdin/stdout. The server advertises three kin
 The official Python SDK (FastMCP) does the JSON-RPC plumbing; this file only declares tools.
 
 STATELESS DESIGN: every tool call writes a small job description, starts `freecadcmd` in a subprocess on the
-document workspace/<doc>.FCStd, the worker (freecad_worker/) performs ONE operation, saves the document and writes a
+document workspace/<doc>.FCStd, the worker (cad_mcp/) performs ONE operation, saves the document and writes a
 JSON result file that we return. No long-lived FreeCAD process, so a crash or a hang never corrupts the session.
 State lives in the .FCStd files; before each modifying call the previous version is copied to workspace/.history/
 which gives `undo`. IMPORTANT: stdout is the protocol channel, so never print() to it; log to stderr.
@@ -31,7 +31,7 @@ from mcp.server.fastmcp import FastMCP, Image
 from mcp.server.fastmcp.exceptions import ToolError
 
 import render as R
-from freecad_worker.materials import MATERIALS
+from cad_mcp.materials import MATERIALS
 
 ROOT = Path(__file__).resolve().parent
 WORKSPACE = Path(os.environ.get("FREECAD_MCP_WORKSPACE", ROOT / "workspace")).resolve()
@@ -41,7 +41,7 @@ TIMEOUT = int(os.environ.get("FREECAD_MCP_TIMEOUT", "240"))
 LIBRARY = Path(os.environ.get("FREECAD_MCP_LIBRARY", ROOT / "library")).resolve()
 HISTORY = 20            # undo depth per document
 
-mcp = FastMCP("freecad-engineering")
+mcp = FastMCP("cad_mcp")
 
 Vec3 = list[float]
 Faces = Union[list[int], str]
@@ -71,7 +71,7 @@ def run_worker(op: str, doc: Optional[str] = None, **args):
     """Run one worker operation in a fresh freecadcmd process and return its `result` dict."""
     WORKSPACE.mkdir(parents=True, exist_ok=True)
     path = _doc_path(doc) if doc else None
-    from freecad_worker import ops_registry   # noqa: F401  (pure-python table of which ops mutate)
+    from cad_mcp import ops_registry   # noqa: F401  (pure-python table of which ops mutate)
     if path is not None and op in ops_registry.MUTATING and op != "new_document":
         _snapshot(path)
     if op == "new_document" and path.exists():
@@ -81,7 +81,7 @@ def run_worker(op: str, doc: Optional[str] = None, **args):
         jp = os.path.join(td, "job.json")
         json.dump(job, open(jp, "w"))
         script = os.path.join(td, "job.py")      # the tiny script freecadcmd executes
-        open(script, "w").write(f"import sys\nsys.path.insert(0, {str(ROOT)!r})\nfrom freecad_worker import core\ncore.main()\n")
+        open(script, "w").write(f"import sys\nsys.path.insert(0, {str(ROOT)!r})\nfrom cad_mcp import core\ncore.main()\n")
         env = dict(os.environ, FCMCP_JOB=jp, QT_QPA_PLATFORM="offscreen")
         cmd = LAUNCHER + [FREECADCMD, script]
         try:
@@ -255,6 +255,27 @@ def check_interference(doc: str, objects: Optional[list[str]] = None, tolerance_
     intersection. Pairs above `tolerance_mm3` are returned with the common volume, overlap centre and size.
     Face contact (zero volume) is not interference. `clean: true` means no pair overlaps."""
     return _j(run_worker("check_interference", doc, objects=objects, tolerance_mm3=tolerance_mm3))
+
+
+@mcp.tool()
+def run_fem(doc: str, name: str, fixed_faces: Faces, loads: list[dict], material: Optional[str] = None, mesh_size: float = 4.0,
+            exclude_mm: Optional[float] = None, plot_view: Literal["iso", "front", "back", "top", "bottom", "right", "left"] = "iso") -> list:
+    """Linear-static FEM (Gmsh 2nd-order tetrahedra + CalculiX) on ONE solid. Returns max von Mises (MPa), max displacement
+    (mm), yield safety factor, mesh size, and a colour plot of von Mises (returned as an image and saved as PNG).
+    `fixed_faces`: fully fixed faces, either 1-based indices from list_faces or a selector string such as
+    'normal:-Z z:min' (see list_faces). `loads`: list of dicts, each with `faces` (indices or selector) and either
+    `force_n` (total force in newtons, spread over those faces) + `direction` [x,y,z], or `pressure_mpa` (acts normal into
+    the face). Example: loads=[{"faces": "normal:+X x:max", "force_n": 500, "direction": [0,0,-1]}].
+    `material` defaults to the object's material. `mesh_size` is the max element edge in mm: smaller is more accurate and
+    slower (keep >= thickness/2; 3-5 mm is fine for hand-sized parts, runtime seconds to a minute).
+    Stress at the edge of a fixed/loaded face is a numerical singularity, so `max_von_mises_mpa` (and the safety factor)
+    ignore nodes within `exclude_mm` (default = mesh_size) of those edges; `*_raw` values include them. Fillet sharp
+    corners and refine the mesh before trusting stress concentrations."""
+    p = _out("fem", doc, f"{name}_vm.png")
+    res = run_worker("run_fem", doc, name=name, material=material, fixed_faces=fixed_faces, loads=loads, mesh_size=mesh_size,
+                     plot_path=str(p), exclude_mm=exclude_mm, plot_view=plot_view)
+    _out("fem", doc, f"{name}_result.json").write_text(_j(res))
+    return [_j(res), Image(data=p.read_bytes(), format="png")]
 
 
 # ============================================================================ seeing the part

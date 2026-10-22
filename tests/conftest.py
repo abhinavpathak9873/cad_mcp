@@ -4,7 +4,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-os.environ.setdefault("FREECADCMD", "/home/abhinavpathak/Applications/freecad/squashfs-root/usr/bin/freecadcmd")
+os.environ.setdefault("FREECADCMD", __import__("shutil").which("freecadcmd") or "freecadcmd")
 os.environ.setdefault("FREECAD_MCP_WORKSPACE", tempfile.mkdtemp(prefix="fcmcp_ws_"))
 
 @pytest.fixture(scope="session")

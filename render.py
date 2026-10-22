@@ -10,7 +10,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.collections import PolyCollection
 
-from freecad_worker.materials import MATERIALS
+from cad_mcp.materials import MATERIALS
 
 PALETTE = [(0.55, 0.66, 0.82), (0.82, 0.62, 0.45), (0.60, 0.75, 0.58), (0.78, 0.58, 0.72), (0.85, 0.80, 0.50), (0.55, 0.78, 0.80)]
 VIEWS = ("iso", "front", "back", "top", "bottom", "right", "left", "grid")
@@ -71,6 +71,35 @@ def apply_explode(items, factor):
     return out
 
 
+def _feature_edges(tr, r, u, t, angle_deg=35.0):
+    """Edges whose two triangles meet at more than angle_deg (or that have only one triangle). Returns 2D segments and sort depth."""
+    if len(tr) == 0:
+        return [], []
+    n = np.cross(tr[:, 1] - tr[:, 0], tr[:, 2] - tr[:, 0])
+    ln = np.linalg.norm(n, axis=1); ln[ln == 0] = 1; n = n / ln[:, None]
+    scale = max(np.ptp(tr.reshape(-1, 3), axis=0).max(), 1e-9)
+    key = np.round(tr / (scale * 1e-6)).astype(np.int64)
+    vid = {}
+    ids = np.array([[vid.setdefault(tuple(v), len(vid)) for v in tri] for tri in key])
+    edges = {}
+    for ti in range(len(tr)):
+        for a, b in ((0, 1), (1, 2), (2, 0)):
+            i, j = ids[ti, a], ids[ti, b]
+            edges.setdefault((min(i, j), max(i, j)), []).append((ti, a, b))
+    coslim = np.cos(np.radians(angle_deg))
+    segs, deps = [], []
+    for k, lst in edges.items():
+        if len(lst) == 2 and n[lst[0][0]] @ n[lst[1][0]] > coslim:
+            continue
+        if not any(n[ti] @ t > -1e-6 for ti, _, _ in lst):
+            continue
+        ti, a, b = lst[0]
+        p0, p1 = tr[ti, a], tr[ti, b]
+        segs.append((np.array([p0 @ r, p0 @ u]), np.array([p1 @ r, p1 @ u])))
+        deps.append(max(p0 @ t, p1 @ t) + 1e-3 * scale)
+    return segs, deps
+
+
 def _draw(ax, items, view, label=None):
     r, u, t = view_basis(view)
     polys, cols, depth = [], [], []
@@ -85,12 +114,31 @@ def _draw(ax, items, view, label=None):
         front = (n @ t) > -1e-6 if it.get("cull", True) else np.ones(len(tr), bool)
         base = np.array(_color(it, i))
         sh = _shade(n, t, r, u)
+        if "vals" in it:                      # scalar field per triangle (FEM plots): colormap instead of material colour
+            cm = plt.get_cmap("turbo"); vm = it["vmax"]
+            fc = np.array([cm(min(v / vm, 1.0))[:3] for v in it["vals"]])
+            sh = 0.75 + 0.25 * sh
         sh = np.where(n @ t < 0, sh * 0.6, sh)
         xy = np.stack([tr @ r, tr @ u], axis=-1)
         allp.append(xy.reshape(-1, 2))
         d = (tr @ t).mean(1)
         sel = front & ok
-        polys += list(xy[sel]); cols += list(np.clip(base[None, :] * sh[sel, None] * 1.1, 0, 1)); depth += list(d[sel])
+        polys += list(xy[sel]); depth += list(d[sel])
+        if "vals" in it:
+            cols += list(np.clip(fc[sel] * sh[sel, None], 0, 1))
+        else:
+            cols += list(np.clip(base[None, :] * sh[sel, None, ] * np.array([1.12, 1.08, 1.0]), 0, 1))
+    # --- feature edges (sharp creases + open boundaries) as thin dark quads, depth-sorted together with the faces
+    allxy = np.concatenate(allp); span = (allxy.max(0) - allxy.min(0)).max()
+    w = span * 0.0028
+    for it in items:
+        e, dep = _feature_edges(it["tris"], r, u, t)
+        for (a, b), dz in zip(e, dep):
+            d2 = b - a; L = np.hypot(*d2)
+            if L < 1e-9:
+                continue
+            nrm = np.array([-d2[1], d2[0]]) / L * w
+            polys.append(np.array([a + nrm, b + nrm, b - nrm, a - nrm])); cols.append((0.12, 0.12, 0.14)); depth.append(dz)
     order = np.argsort(depth)
     pc = PolyCollection([polys[k] for k in order], facecolors=[cols[k] for k in order],
                         edgecolors=[cols[k] for k in order], linewidths=0.6, antialiased=False)
@@ -117,5 +165,19 @@ def render_png(items, view="iso", size=900, explode=0.0, title=None):
         _draw(ax, items, view)
     if title:
         fig.suptitle(title, fontsize=10, color="#333")
+    buf = io.BytesIO(); fig.savefig(buf, format="png", facecolor=bg); plt.close(fig)
+    return buf.getvalue()
+
+
+def render_field_png(tris, vals, vmax, view="iso", size=900, title="", unit="MPa"):
+    """Colour-mapped surface plot (FEM results). vals: one scalar per triangle."""
+    bg = "#f1f2f4"
+    fig = plt.figure(figsize=(size / 100 * 1.1, size / 100 * 0.8), dpi=100, facecolor=bg)
+    ax = fig.add_axes([0.02, 0.02, 0.80, 0.94]); ax.set_facecolor(bg)
+    _draw(ax, [dict(tris=tris, vals=vals, vmax=vmax)], view)
+    cax = fig.add_axes([0.86, 0.15, 0.025, 0.65])
+    sm = plt.cm.ScalarMappable(cmap="turbo", norm=plt.Normalize(0, vmax)); sm.set_array([])
+    fig.colorbar(sm, cax=cax, label=unit)
+    fig.suptitle(title, fontsize=10, color="#333")
     buf = io.BytesIO(); fig.savefig(buf, format="png", facecolor=bg); plt.close(fig)
     return buf.getvalue()

@@ -3,8 +3,8 @@ import FreeCAD as App
 import Part
 from FreeCAD import Vector as V
 
-from freecad_worker.core import op, r3, get, pick, com
-from freecad_worker.materials import get_material
+from cad_mcp.core import op, r3, get, pick, com
+from cad_mcp.materials import get_material
 
 TOL_MM3 = 0.01
 

@@ -4,9 +4,9 @@ import FreeCAD as App
 import Part
 from FreeCAD import Vector as V
 
-from freecad_worker.core import (op, vec, r3, get, pick, add_shape, placement, describe, meta, ensure_meta, bbox,
+from cad_mcp.core import (op, vec, r3, get, pick, add_shape, placement, describe, meta, ensure_meta, bbox,
                                  resolve_faces, resolve_edges, solids_objects, clean_name)
-from freecad_worker.materials import get_material, MATERIALS
+from cad_mcp.materials import get_material, MATERIALS
 
 
 @op("new_document", mutates=True)
