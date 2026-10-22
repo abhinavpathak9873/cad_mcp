@@ -366,8 +366,8 @@ a{color:var(--fc)}
   <code>render_view</code> tool: FreeCAD exports the shape as triangles, cad_mcp draws them into a PNG, and the PNG goes
   back to the AI as an image. Modern models can look at images, so the AI checks its own work the way you would.</p>
   <div class="grid g2">
-    <div><img class="shot" src="img/step1_grid.png" alt="Four-view render of an L-bracket"><div class="cap">What the AI gets back from <code>render_view(view="grid")</code>: iso, front, top and side.</div></div>
-    <div><img class="shot" src="img/step2_drawing.png" alt="Technical drawing"><div class="cap"><code>make_drawing</code> runs FreeCAD's TechDraw to produce a real engineering drawing (SVG/PDF).</div></div>
+    <div><img class="shot" src="img/bracket_grid.png" alt="Four-view render of an L-bracket"><div class="cap">What the AI gets back from <code>render_view(view="grid")</code>: iso, front, top and side.</div></div>
+    <div><img class="shot" src="img/bracket_drawing.png" alt="Technical drawing"><div class="cap"><code>make_drawing</code> runs FreeCAD's TechDraw to produce a real engineering drawing (SVG/PDF).</div></div>
   </div>
   <div class="diagram" style="margin-top:16px">
   <svg viewBox="0 0 1000 120" width="100%">
@@ -414,8 +414,10 @@ a{color:var(--fc)}
     <div class="card toolgroup"><h4>🔩 Assemblies</h4><p>multiple parts, standard screws / nuts / washers by size, STEP parts library, exploded views</p></div>
     <div class="card toolgroup"><h4>📤 Export & escape hatch</h4><p>export (STEP, STL, 3MF, OBJ, DXF, FCStd), import_step, render_view, run_script for anything not on the menu</p></div>
   </div>
-  <p class="cap">Assemblies, fasteners, the parts library, clearance, section views, DXF and undo are being added now (step 3)
-  and land in the repo as they pass their tests.</p>
+  <div class="grid g2" style="margin-top:16px">
+    <div><img class="shot" src="img/bracket_fem_vonmises.png" alt="FEM stress plot"><div class="cap"><code>run_fem</code>: 300 N on the bracket, max stress 50 MPa, safety factor 5.5 (aluminium 6061).</div></div>
+    <div><img class="shot" src="img/bracket_exploded.png" alt="Exploded view"><div class="cap"><code>render_view(explode=1)</code>: the bracket with its standard bolts pulled apart.</div></div>
+  </div>
 </div></section>
 
 <!-- ================================================================== 10 -->
