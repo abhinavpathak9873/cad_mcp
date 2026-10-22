@@ -32,31 +32,85 @@ It is written to be readable: `server.py` is one file with the tool declarations
 - Renders: FreeCAD tessellates each object to STL; the server projects the triangles, draws sharp edges, shades and returns
   a PNG as MCP image content, so the model can actually look at its part.
 
-## Setup
+## Install and use
 
-Requirements: FreeCAD 1.x with the FEM workbench (CalculiX and Gmsh come with the FreeCAD AppImage), Python 3.10+, `uv`.
+You need three things on the machine that runs the server: FreeCAD 1.x (headless `freecadcmd` is enough), Python 3.10+
+and [`uv`](https://docs.astral.sh/uv/). The AI client (Claude Code, Codex, Claude Desktop, Cursor, ...) starts the server
+itself as a subprocess and talks to it over stdin/stdout, so you never run `server.py` by hand in normal use.
 
-```
-git clone https://github.com/abhinavpathak9873/cad_mcp && cd cad_mcp
-uv sync
-export FREECADCMD=/path/to/freecadcmd      # default: freecadcmd on PATH
-uv run pytest -q                           # runs the real FreeCAD tests (a few minutes)
-```
-
-Environment variables: `FREECADCMD`, `FREECAD_MCP_WORKSPACE` (default `./workspace`), `FREECAD_MCP_TIMEOUT` (seconds per call,
-default 240), `FREECAD_MCP_LAUNCHER` (command prefix for the subprocess, e.g. `systemd-run --user --scope -p MemoryMax=8G`).
-
-### Register with Claude Code
+### 1. Get the server and find `freecadcmd`
 
 ```
-claude mcp add cad_mcp -e FREECADCMD=/path/to/freecadcmd -- uv --directory /abs/path/to/cad_mcp run server.py
+git clone https://github.com/abhinavpathak9873/cad_mcp
+cd cad_mcp
+uv sync                      # creates .venv with the mcp SDK, numpy, matplotlib
 ```
 
-or commit a `.mcp.json` next to your project (see `.mcp.json.example`).
+Find the headless FreeCAD binary for your OS; this path goes into `FREECADCMD` below:
 
-### Register with Claude Desktop
+- Linux, distro package: `freecadcmd` (often already on PATH; check with `which freecadcmd`).
+- Linux, AppImage: run `./FreeCAD_*.AppImage --appimage-extract` once, then use `<dir>/squashfs-root/usr/bin/freecadcmd`.
+- macOS: `/Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd`.
+- Windows: `C:\Program Files\FreeCAD 1.0\bin\freecadcmd.exe` (adjust the version folder).
 
-Add to `claude_desktop_config.json`:
+Check FreeCAD and the server work before wiring up a client:
+
+```
+export FREECADCMD=/path/to/freecadcmd
+"$FREECADCMD" -c "import FreeCAD; print(FreeCAD.Version())"
+uv run pytest -q             # real FreeCAD runs, takes a few minutes
+```
+
+Use absolute paths everywhere below. Clients start the server from their own working directory, so relative paths break.
+
+### 2a. Claude Code
+
+One command (user scope = available in every project; use `--scope project` to write a shareable `.mcp.json` instead):
+
+```
+claude mcp add cad_mcp --scope user \
+  -e FREECADCMD=/path/to/freecadcmd \
+  -- uv --directory /abs/path/to/cad_mcp run server.py
+```
+
+Then check it: `claude mcp list` should show `cad_mcp ... Connected`, and inside a session `/mcp` lists its tools.
+FEM and drawings can take longer than the default tool timeout, so start Claude Code with a longer one:
+
+```
+MCP_TOOL_TIMEOUT=300000 claude      # milliseconds
+```
+
+Project-scoped alternative: copy `.mcp.json.example` to `.mcp.json` in your project root and fix the two paths. Claude Code
+asks once whether to trust project MCP servers.
+
+Remove it again with `claude mcp remove cad_mcp`.
+
+### 2b. Codex (OpenAI Codex CLI / IDE extension)
+
+One command:
+
+```
+codex mcp add cad_mcp --env FREECADCMD=/path/to/freecadcmd \
+  -- uv --directory /abs/path/to/cad_mcp run server.py
+```
+
+or add it by hand to `~/.codex/config.toml` (the CLI and the IDE extension share this file):
+
+```toml
+[mcp_servers.cad_mcp]
+command = "uv"
+args = ["--directory", "/abs/path/to/cad_mcp", "run", "server.py"]
+env = { FREECADCMD = "/path/to/freecadcmd" }
+startup_timeout_sec = 30
+tool_timeout_sec = 300        # FEM and drawings can exceed the 60 s default
+```
+
+Check with `codex mcp list`, and inside a Codex session with `/mcp`. Remove with `codex mcp remove cad_mcp`.
+
+### 2c. Claude Desktop
+
+Settings > Developer > Edit Config opens `claude_desktop_config.json`
+(macOS `~/Library/Application Support/Claude/`, Windows `%APPDATA%\Claude\`). Add:
 
 ```json
 {
@@ -69,6 +123,51 @@ Add to `claude_desktop_config.json`:
   }
 }
 ```
+
+Restart Claude Desktop; the tools appear under the tools icon in the chat box. If `uv` is not found, put the absolute path
+to `uv` in `command` (`which uv`), because the desktop app does not load your shell PATH.
+
+### 2d. Any other MCP client (Cursor, VS Code, Windsurf, Zed, ...)
+
+They all use the same three fields: command `uv`, args `--directory /abs/path/to/cad_mcp run server.py`, env
+`FREECADCMD`. Cursor reads the same JSON shape as above from `.cursor/mcp.json`; VS Code uses `.vscode/mcp.json` with the
+top-level key `servers` instead of `mcpServers`.
+
+### 3. Poke it without any AI client
+
+The MCP Inspector is a small web UI that acts as a client, so you can list tools and call them by hand:
+
+```
+npx @modelcontextprotocol/inspector uv --directory /abs/path/to/cad_mcp run server.py
+```
+
+`client_raw.py` does the same from plain Python with no SDK and prints every JSON-RPC
+message, which is the clearest way to see what the protocol actually looks like.
+
+### 4. First prompt to try
+
+> Using cad_mcp: make an L-bracket, 60 x 40 mm base and 50 mm wall, 5 mm thick aluminium 6061, two M6 clearance holes in
+> the base, 3 mm fillet on the inside corner. Render it and look at it, give me the mass, then run FEM with the wall's
+> back face fixed and 300 N down on the base's top face. If the yield safety factor is under 3, thicken it and rerun.
+> Finish with a drawing and a STEP export.
+
+### Settings
+
+Environment variables read by the server:
+
+- `FREECADCMD`: path to `freecadcmd` (default: `freecadcmd` on PATH).
+- `FREECAD_MCP_WORKSPACE`: where documents, renders and exports are written (default `./workspace` inside the repo).
+- `FREECAD_MCP_TIMEOUT`: seconds allowed per FreeCAD call (default 240).
+- `FREECAD_MCP_LAUNCHER`: command prefix for each FreeCAD subprocess, e.g. `systemd-run --user --scope -p MemoryMax=8G`
+  to cap memory on a shared machine.
+
+### Troubleshooting
+
+- Server shows as failed or disconnected: run `uv --directory /abs/path/to/cad_mcp run server.py` yourself. It should sit
+  silently waiting for input (Ctrl-C to quit). Any traceback is the real error.
+- Tools time out: raise the client's tool timeout (see above) and `FREECAD_MCP_TIMEOUT`, or use a coarser FEM mesh.
+- `freecadcmd` not found: `FREECADCMD` must be an absolute path to the binary, not to the AppImage file itself.
+- Never `print()` to stdout inside the server: stdout is the protocol channel. Logs go to stderr.
 
 ## Tool reference
 
