@@ -168,6 +168,19 @@ def _select(items, centers, spec, kind):
     return [i + 1 for i in idx]
 
 def resolve_faces(shape, spec):
+    """Accepts one spec or a list of specs (strings / index lists) which are united, e.g. ['normal:-Z z:min', [4, 7]]."""
+    if isinstance(spec, (list, tuple)) and spec and any(isinstance(x, (str, list, tuple)) for x in spec):
+        out = []
+        for sp in spec:
+            for i in resolve_faces(shape, sp):
+                if i not in out:
+                    out.append(i)
+        return out
+    if isinstance(spec, int):
+        spec = [spec]
+    return _resolve_faces(shape, spec)
+
+def _resolve_faces(shape, spec):
     """spec: list of 1-based face indices, or a selector string (see list_faces docstring). Returns 1-based indices."""
     if isinstance(spec, (list, tuple)):
         for i in spec:
@@ -178,6 +191,8 @@ def resolve_faces(shape, spec):
     return _select(shape.Faces, centers, str(spec), "face")
 
 def resolve_edges(shape, spec):
+    if isinstance(spec, int):
+        spec = [spec]
     if isinstance(spec, (list, tuple)):
         for i in spec:
             if not 1 <= int(i) <= len(shape.Edges):
@@ -213,4 +228,4 @@ def main():
     sys.stdout.flush()
 
 # operation modules register themselves on import
-from cad_mcp import ops_model, ops_analysis, ops_fem, ops_features, ops_docs  # noqa: E402,F401
+from cad_mcp import ops_model, ops_analysis, ops_fem, ops_features, ops_docs, ops_assembly  # noqa: E402,F401

@@ -1,0 +1,6 @@
+| item | part_no | name | description | material | supplier | quantity | volume_mm3 | unit_mass_g | total_mass_g |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | BR-001 | bracket | L bracket 60x40x30 | aluminium_6061 |  | 1 | 14010.89 | 37.829 | 37.829 |
+| 2 | ISO 4762 M6x16 | bolt0 | Socket head cap screw M6x16 | steel |  | 2 | 843.52 | 6.622 | 13.244 |
+
+Total mass: 51.073 g

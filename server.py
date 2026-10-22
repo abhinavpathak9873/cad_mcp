@@ -44,7 +44,7 @@ HISTORY = 20            # undo depth per document
 mcp = FastMCP("cad_mcp")
 
 Vec3 = list[float]
-Faces = Union[list[int], str]
+Faces = Union[int, list[int], str]
 
 
 # ============================================================================ plumbing
@@ -76,6 +76,7 @@ def run_worker(op: str, doc: Optional[str] = None, **args):
         _snapshot(path)
     if op == "new_document" and path.exists():
         raise ToolError(f"document {doc!r} already exists")
+    mutating = path is not None and op in ops_registry.MUTATING
     with tempfile.TemporaryDirectory(prefix="fcmcp_") as td:
         job = dict(op=op, doc=str(path) if path else None, args=args, result=os.path.join(td, "result.json"))
         jp = os.path.join(td, "job.json")
@@ -93,7 +94,18 @@ def run_worker(op: str, doc: Optional[str] = None, **args):
         res = json.load(open(job["result"]))
     if not res["ok"]:
         raise ToolError(res["error"])
+    if mutating:
+        _journal(path, op, args)
     return res["result"]
+
+
+def _journal(path: Path, op: str, args: dict):
+    """Append one line per successful modifying call (used by object_history and list_history)."""
+    h = WORKSPACE / ".history" / path.stem
+    h.mkdir(parents=True, exist_ok=True)
+    short = json.dumps(args, default=str)
+    with open(h / "journal.jsonl", "a") as f:
+        f.write(json.dumps(dict(t=time.strftime("%F %T"), op=op, args=short[:400])) + "\n")
 
 
 def _j(d) -> str:
@@ -120,6 +132,53 @@ def list_documents() -> str:
     WORKSPACE.mkdir(parents=True, exist_ok=True)
     return _j([dict(name=p.stem, bytes=p.stat().st_size, modified=time.strftime("%F %T", time.localtime(p.stat().st_mtime)))
                for p in sorted(WORKSPACE.glob("*.FCStd"))])
+
+
+@mcp.tool()
+def document_info(doc: str) -> str:
+    """Summary of a document: file size, object names, overall bounding box, undo depth and the last 5 modifying operations."""
+    info = run_worker("document_info", doc)
+    h = WORKSPACE / ".history" / doc
+    info["undo_depth"] = len(list(h.glob("*.FCStd"))) if h.exists() else 0
+    jl = h / "journal.jsonl"
+    info["recent_operations"] = [json.loads(x) for x in jl.read_text().splitlines()[-5:]] if jl.exists() else []
+    info["bytes"] = _doc_path(doc).stat().st_size
+    return _j(info)
+
+
+@mcp.tool()
+def undo(doc: str, steps: int = 1) -> str:
+    """Undo the last `steps` modifying operations by restoring the previous saved version of the document (up to 20 versions are
+    kept). The restored version replaces the current file; there is no redo, so check list_history first if unsure."""
+    h = WORKSPACE / ".history" / doc
+    snaps = sorted(h.glob("*.FCStd")) if h.exists() else []
+    if len(snaps) < steps:
+        raise ToolError(f"only {len(snaps)} undo step(s) available")
+    target = snaps[-steps]
+    shutil.copy2(target, _doc_path(doc))
+    for sp in snaps[-steps:]:
+        sp.unlink()
+    jl = h / "journal.jsonl"
+    if jl.exists():
+        lines = jl.read_text().splitlines()
+        jl.write_text("\n".join(lines[:-steps]) + ("\n" if lines[:-steps] else ""))
+    return _j(dict(restored=target.name, remaining_undo_steps=len(snaps) - steps))
+
+
+@mcp.tool()
+def list_history(doc: str, limit: int = 30) -> str:
+    """Journal of modifying operations applied to `doc` (time, operation, abbreviated arguments), newest last."""
+    jl = WORKSPACE / ".history" / doc / "journal.jsonl"
+    rows = [json.loads(x) for x in jl.read_text().splitlines()] if jl.exists() else []
+    return _j(rows[-limit:])
+
+
+@mcp.tool()
+def object_history(doc: str, name: str) -> str:
+    """All journal entries whose arguments mention object `name`: how it was created, edited, combined or moved."""
+    jl = WORKSPACE / ".history" / doc / "journal.jsonl"
+    rows = [json.loads(x) for x in jl.read_text().splitlines()] if jl.exists() else []
+    return _j([r for r in rows if f'"{name}"' in r["args"]])
 
 
 @mcp.tool()
@@ -258,12 +317,12 @@ def check_interference(doc: str, objects: Optional[list[str]] = None, tolerance_
 
 
 @mcp.tool()
-def run_fem(doc: str, name: str, fixed_faces: Faces, loads: list[dict], material: Optional[str] = None, mesh_size: float = 4.0,
+def run_fem(doc: str, name: str, fixed_faces: Union[list[int], str, list], loads: list[dict], material: Optional[str] = None, mesh_size: float = 4.0,
             exclude_mm: Optional[float] = None, plot_view: Literal["iso", "front", "back", "top", "bottom", "right", "left"] = "iso") -> list:
     """Linear-static FEM (Gmsh 2nd-order tetrahedra + CalculiX) on ONE solid. Returns max von Mises (MPa), max displacement
     (mm), yield safety factor, mesh size, and a colour plot of von Mises (returned as an image and saved as PNG).
-    `fixed_faces`: fully fixed faces, either 1-based indices from list_faces or a selector string such as
-    'normal:-Z z:min' (see list_faces). `loads`: list of dicts, each with `faces` (indices or selector) and either
+    `fixed_faces`: fully fixed faces (several fixtures allowed): 1-based indices from list_faces, a selector string such as
+    'normal:-Z z:min' (see list_faces), or a list mixing selectors and index lists, which are united. `loads`: list of dicts, each with `faces` (indices or selector) and either
     `force_n` (total force in newtons, spread over those faces) + `direction` [x,y,z], or `pressure_mpa` (acts normal into
     the face). Example: loads=[{"faces": "normal:+X x:max", "force_n": 500, "direction": [0,0,-1]}].
     `material` defaults to the object's material. `mesh_size` is the max element edge in mm: smaller is more accurate and
@@ -276,6 +335,74 @@ def run_fem(doc: str, name: str, fixed_faces: Faces, loads: list[dict], material
                      plot_path=str(p), exclude_mm=exclude_mm, plot_view=plot_view)
     _out("fem", doc, f"{name}_result.json").write_text(_j(res))
     return [_j(res), Image(data=p.read_bytes(), format="png")]
+
+
+# ============================================================================ assemblies, fasteners, library, clearance
+@mcp.tool()
+def mate_faces(doc: str, moving: str, moving_face: Faces, fixed: str, fixed_face: Faces, offset: float = 0.0,
+               rotate_about_normal_deg: float = 0.0) -> str:
+    """Placement-based assembly joint: move object `moving` so its planar face lies against a planar face of `fixed` (normals
+    facing each other), centres aligned, separated by `offset` mm (use a negative value to sink in). Each face spec must match
+    exactly one face (index or selector, see list_faces). Optionally spin the part about the contact normal afterwards."""
+    return _j(run_worker("mate_faces", doc, moving=moving, moving_face=moving_face, fixed=fixed, fixed_face=fixed_face,
+                         offset=offset, rotate_about_normal_deg=rotate_about_normal_deg))
+
+
+@mcp.tool()
+def mate_coaxial(doc: str, moving: str, moving_face: Faces, fixed: str, fixed_face: Faces, axial_offset: float = 0.0, flip: bool = False) -> str:
+    """Make a cylindrical face of `moving` (e.g. a bolt shank) coaxial with a cylindrical face of `fixed` (e.g. a hole) and slide
+    it `axial_offset` mm along the shared axis. `flip` reverses the moving part's direction. Combine with mate_faces to seat a
+    screw head on a surface, then check_interference / check_clearance."""
+    return _j(run_worker("mate_coaxial", doc, moving=moving, moving_face=moving_face, fixed=fixed, fixed_face=fixed_face,
+                         axial_offset=axial_offset, flip=flip))
+
+
+@mcp.tool()
+def add_fastener(doc: str, name: str, kind: Literal["shcs", "hex_bolt", "hex_nut", "washer"], size: Literal["M3", "M4", "M5", "M6", "M8", "M10", "M12"],
+                 length: Optional[float] = None, position: Vec3 = [0, 0, 0], direction: Vec3 = [0, 0, -1]) -> str:
+    """Generate a parametric ISO-style fastener (steel, with part number and description set for the BOM): shcs = ISO 4762 socket
+    head cap screw, hex_bolt = ISO 4017, hex_nut = ISO 4032, washer = ISO 7089. `length` (mm under the head) is required for bolts.
+    `position` is the bearing face (underside of the head / one face of the nut or washer); `direction` is the way the shank
+    points, e.g. [0,0,-1] for a screw going down from a top face. Modelled nominal size (no threads)."""
+    return _j(run_worker("add_fastener", doc, name=name, kind=kind, size=size, length=length, position=position, direction=direction))
+
+
+@mcp.tool()
+def list_library(query: str = "") -> str:
+    """List STEP files (.step/.stp) in the local parts library folder (env FREECAD_MCP_LIBRARY, default ./library), optionally
+    filtered by a case-insensitive substring. Use the returned relative path with insert_library_part."""
+    files = sorted(p for p in LIBRARY.rglob("*") if p.suffix.lower() in (".step", ".stp")) if LIBRARY.exists() else []
+    return _j([str(p.relative_to(LIBRARY)) for p in files if query.lower() in str(p).lower()])
+
+
+@mcp.tool()
+def insert_library_part(doc: str, library_path: str, name: str, position: Optional[Vec3] = None, rotation_axis: Optional[Vec3] = None,
+                        rotation_deg: float = 0.0, material: Optional[str] = None) -> str:
+    """Insert a STEP file from the parts library (see list_library) as object `name`, then optionally rotate/translate it."""
+    p = (LIBRARY / library_path).resolve()
+    if LIBRARY not in p.parents or not p.exists():
+        raise ToolError(f"{library_path!r} not found in the library (use list_library)")
+    r = run_worker("import_step", doc, path=str(p), name=name, material=material)
+    if position or rotation_deg:
+        r = run_worker("transform", doc, name=name, translate=position, rotation_axis=rotation_axis, rotation_deg=rotation_deg)
+    return _j(r)
+
+
+@mcp.tool()
+def check_clearance(doc: str, objects: Optional[list[str]] = None, report_below_mm: float = 5.0) -> str:
+    """Minimum distance between every pair of solids (exact), returning the pairs closer than `report_below_mm` sorted by
+    distance with the closest point on each. Distance 0 means touching or overlapping (use check_interference for volume)."""
+    return _j(run_worker("check_clearance", doc, objects=objects, report_below_mm=report_below_mm))
+
+
+@mcp.tool()
+def export_dxf(doc: str, name: str, face: Optional[Faces] = None, plane: Optional[Literal["x", "y", "z"]] = None, offset: float = 0.0,
+               filename: Optional[str] = None) -> str:
+    """Export a 2D DXF outline for laser/waterjet cutting. Either `face` (one planar face, by index or selector; its boundary
+    and holes in the face's own 2D coordinates) or `plane` + `offset` (cross-section of the object by the plane x=, y= or z=offset).
+    Lines and full circles are written as LINE/CIRCLE entities in mm. Saved under workspace/exports/<doc>/."""
+    p = _out("exports", doc, filename or f"{name}.dxf")
+    return _j(run_worker("export_dxf", doc, path=str(p), name=name, face=face, plane=plane, offset=offset))
 
 
 # ============================================================================ sketches and features
@@ -415,6 +542,34 @@ def render_view(doc: str, view: Literal["iso", "front", "back", "top", "bottom",
     png = R.render_png(items, view, size, explode, title or f"{doc} - {view}")
     p = _out("renders", doc, f"{view}{'_exploded' if explode else ''}.png")
     p.write_bytes(png)
+    return [f"saved {p}", Image(data=png, format="png")]
+
+
+@mcp.tool()
+def section_view(doc: str, axis: Literal["x", "y", "z"], offset: float, remove: Literal["above", "below"] = "above",
+                 objects: Optional[list[str]] = None, view: str = "auto", size: int = 900) -> list:
+    """Cut the model with the plane axis=offset (e.g. z=10), discard the half on the `remove` side and render what is left, with
+    the cut faces highlighted in orange so internal features (bores, walls, fastener fit) are visible. view 'auto' looks straight
+    at the cut face; any render_view name also works. Nothing in the document is changed."""
+    d = _out("renders", doc, "stl_sec")
+    res = run_worker("export_section_for_render", doc, out_dir=str(d), axis=axis, offset=offset, remove=remove, objects=objects)
+    items = []
+    ai = "xyz".index(axis)
+    for i in res["items"]:
+        tris = R.load_stl(i["stl"])
+        on = np.all(np.abs(tris[:, :, ai] - offset) < 1e-3, axis=1)
+        base = dict(name=i["name"], color=i["color"] or None, material=i["material"] or None)
+        items.append(dict(base, tris=tris[~on]))
+        if on.any():
+            base_c = np.array(R._color(base, 0)); cap = 0.45 * base_c + 0.55 * np.array([0.95, 0.45, 0.1])
+            items.append(dict(name=i["name"] + "_cut", tris=tris[on], color=",".join(f"{x:.3f}" for x in cap), cull=False))
+    if not items:
+        raise ToolError("the section removed everything")
+    if view == "auto":
+        view = {("x", "above"): "right", ("x", "below"): "left", ("y", "above"): "back", ("y", "below"): "front",
+                ("z", "above"): "top", ("z", "below"): "bottom"}[(axis, remove)]
+    png = R.render_png(items, view, size, 0.0, f"{doc} - section {axis}={offset:g} ({view})")
+    p = _out("renders", doc, f"section_{axis}{offset:g}.png"); p.write_bytes(png)
     return [f"saved {p}", Image(data=png, format="png")]
 
 

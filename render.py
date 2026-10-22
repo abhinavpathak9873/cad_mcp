@@ -130,7 +130,7 @@ def _draw(ax, items, view, label=None):
             cols += list(np.clip(base[None, :] * sh[sel, None, ] * np.array([1.12, 1.08, 1.0]), 0, 1))
     # --- feature edges (sharp creases + open boundaries) as thin dark quads, depth-sorted together with the faces
     allxy = np.concatenate(allp); span = (allxy.max(0) - allxy.min(0)).max()
-    w = span * 0.0028
+    w = span * 0.0016
     for it in items:
         e, dep = _feature_edges(it["tris"], r, u, t)
         for (a, b), dz in zip(e, dep):

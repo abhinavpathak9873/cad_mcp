@@ -12,7 +12,7 @@ It is written to be readable: `server.py` is one file with the tool declarations
 - An MCP server is a program the client starts as a child process. They talk JSON-RPC 2.0 over the server's stdin and stdout.
 - The server advertises three kinds of things. Tools are functions the model can call (typed parameters, the docstring is
   the description the model reads). Resources are read-only data addressed by URI. Prompts are reusable prompt templates.
-- This server has about 40 tools, resources `freecad://documents` and `freecad://materials`, and the prompt
+- This server has 45 tools, resources `freecad://documents` and `freecad://materials`, and the prompt
   `design_and_validate_bracket`.
 - `client_raw.py` talks to the server with no SDK at all, so you can see every message on the wire.
 
@@ -84,6 +84,22 @@ Project-scoped alternative: copy `.mcp.json.example` to `.mcp.json` in your proj
 asks once whether to trust project MCP servers.
 
 Remove it again with `claude mcp remove cad_mcp`.
+
+#### Claude Code plugin (server plus skill in one install)
+
+The repo is also a Claude Code plugin and a one-plugin marketplace. It registers the MCP server (started with `uv` from the
+plugin directory, `FREECADCMD` taken from your environment) and installs the `cad-mcp` skill, which teaches the model the
+engineering loop (model, look, check, FEM to a safety factor, document, export):
+
+```
+/plugin marketplace add abhinavpathak9873/cad_mcp
+/plugin install cad_mcp@cad-mcp-marketplace
+```
+
+Export `FREECADCMD` in the shell that starts Claude Code. Optional: `CAD_MCP_WORKSPACE` to choose where documents are stored.
+
+Skill only (no plugin): copy `skills/cad-mcp` into `~/.claude/skills/` (or a project's `.claude/skills/`) and add the server
+with `claude mcp add` as above.
 
 ### 2b. Codex (OpenAI Codex CLI / IDE extension)
 
@@ -175,10 +191,11 @@ Conventions: millimetres, degrees, +Z up. Faces and edges are addressed by 1-bas
 `list_edges`) or by a selector string such as `normal:+Z z:max` (top face) or `parallel:Y length>25`. Indices change after
 any geometry edit, so list again.
 
-Documents and inspection
-- `new_document`, `list_documents`, `list_objects` (volume, bbox, centre of mass, validity, metadata)
+Documents, state and inspection
+- `new_document`, `list_documents`, `document_info`, `list_objects` (volume, bbox, centre of mass, validity, metadata)
 - `list_faces`, `list_edges` (indices with centres, normals, radii; selectors)
 - `set_properties` (material, part number, description, supplier, colour, quantity)
+- `undo` (restores the previous saved version, 20 deep), `list_history`, `object_history`
 
 Modelling
 - `add_primitive` (box, cylinder, sphere, cone, torus with placement), `extrude_polygon`
@@ -187,15 +204,20 @@ Modelling
 - `boolean` (cut, fuse, common), `transform`, `mirror`, `linear_pattern`, `polar_pattern`
 - `delete_object`, `import_step`
 
+Assemblies, fasteners, library
+- `mate_faces` (face against face with offset), `mate_coaxial` (bolt into hole)
+- `add_fastener` (ISO 4762 socket head cap screw, ISO 4017 hex bolt, ISO 4032 nut, ISO 7089 washer, M3 to M12)
+- `list_library`, `insert_library_part` (STEP files from a local folder, `FREECAD_MCP_LIBRARY`, default `./library`)
+
 Engineering checks
 - `mass_properties` (mass, centre of mass, inertia tensor)
-- `check_interference` (pairwise common volume)
-- `run_fem` (linear static, Gmsh + CalculiX: fixtures, multiple loads, von Mises, displacement, yield safety factor, plot)
+- `check_interference` (pairwise common volume), `check_clearance` (exact minimum distances)
+- `run_fem` (linear static, Gmsh + CalculiX: several fixtures and loads, von Mises, displacement, yield safety factor, plot)
 
 Seeing and documenting
-- `render_view` (iso, front, back, top, bottom, left, right, grid, exploded)
+- `render_view` (iso, front, back, top, bottom, left, right, grid; `explode` for exploded assemblies), `section_view` (cut at a plane)
 - `make_drawing` (third-angle sheet, hidden lines, dimensions, hole callouts, title block; SVG, PDF, PNG)
-- `bom` (CSV and Markdown), `export` (STEP, STL, OBJ, 3MF, FCStd)
+- `bom` (CSV and Markdown), `export` (STEP, STL, OBJ, 3MF, FCStd), `export_dxf` (face or section outline for laser cutting)
 
 Escape hatch
 - `run_script` runs arbitrary FreeCAD Python on a document.
@@ -203,6 +225,15 @@ Escape hatch
 Resources: `freecad://documents`, `freecad://materials`. Prompt: `design_and_validate_bracket`.
 
 Built-in materials: aluminium_6061, steel, stainless_304, pa12, pla, pom (handbook values, not certified).
+
+## Example output
+
+`client_raw.py` runs the whole loop on an L-bracket with two M6 bolts and writes its results to `examples/`:
+`bracket_grid.png`, `bracket_exploded.png`, `bracket_section.png`, `bracket_fem_vonmises.png`, `bracket_drawing.(png|pdf|svg)`,
+`bracket_assembly.step`, `bracket_base.dxf`, `bracket_bom.(csv|md)` and `fem_result.json`. In that run: bracket mass 37.8 g
+(aluminium 6061), a deliberately oversized bolt is reported as an interference (32.5 mm3), and FEM with 300 N on the vertical leg
+and the bolt holes fixed gives max von Mises 49.9 MPa away from the constraints (68.6 MPa raw peak), 0.45 mm displacement and
+a yield safety factor of 5.5.
 
 ## Honest limits
 
@@ -212,6 +243,8 @@ Built-in materials: aluminium_6061, steel, stainless_304, pa12, pla, pom (handbo
   face edges is a numerical singularity; the tool reports a value that excludes it and the raw peak.
 - Objects are stored as plain shapes (not a parametric feature tree), so earlier steps cannot be edited retroactively; use
   undo or rebuild.
+- Fasteners are nominal-size solids without threads; fixtures in FEM are rigid (a bolted hole is fully fixed, no preload or contact).
+- `undo` has no redo, and history is per document file.
 - Interference uses exact boolean intersection and can be slow on complex assemblies.
 
 ## Credits

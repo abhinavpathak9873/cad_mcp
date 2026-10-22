@@ -1,0 +1,20 @@
+{
+  "name": "cad_mcp",
+  "version": "0.1.0",
+  "description": "FreeCAD engineering MCP server and skill: model parts, check mass/interference/clearance, run FEM, make drawings, BOMs and renders from Claude.",
+  "author": { "name": "abhinavpathak9873" },
+  "homepage": "https://github.com/abhinavpathak9873/cad_mcp",
+  "repository": "https://github.com/abhinavpathak9873/cad_mcp",
+  "license": "MIT",
+  "keywords": ["cad", "freecad", "fem", "mcp", "mechanical"],
+  "mcpServers": {
+    "cad_mcp": {
+      "command": "uv",
+      "args": ["--directory", "${CLAUDE_PLUGIN_ROOT}", "run", "server.py"],
+      "env": {
+        "FREECADCMD": "${FREECADCMD:-freecadcmd}",
+        "FREECAD_MCP_WORKSPACE": "${CAD_MCP_WORKSPACE:-${CLAUDE_PLUGIN_ROOT}/workspace}"
+      }
+    }
+  }
+}

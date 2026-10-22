@@ -1,0 +1,15 @@
+{
+  "name": "cad-mcp-marketplace",
+  "owner": { "name": "abhinavpathak9873" },
+  "metadata": { "description": "FreeCAD engineering MCP server plus a CAD workflow skill." },
+  "plugins": [
+    {
+      "name": "cad_mcp",
+      "source": "./",
+      "description": "FreeCAD engineering MCP server and skill: modelling, mass/interference/clearance, FEM, drawings, BOM, renders.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "keywords": ["cad", "freecad", "fem", "mcp"]
+    }
+  ]
+}

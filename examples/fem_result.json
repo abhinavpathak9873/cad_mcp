@@ -1,0 +1,48 @@
+{
+ "object": "bracket",
+ "material": "aluminium_6061",
+ "yield_mpa": 276,
+ "mesh_size_mm": 4.0,
+ "nodes": 6655,
+ "tets": 3399,
+ "fixed_faces": [
+  10,
+  11
+ ],
+ "loads": [
+  {
+   "faces": [
+    8
+   ],
+   "force_n": 300,
+   "direction": [
+    1.0,
+    0.0,
+    0.0
+   ]
+  }
+ ],
+ "max_von_mises_mpa_raw": 68.626,
+ "max_von_mises_mpa": 49.905,
+ "max_von_mises_location": [
+  8.2063,
+  16.2456,
+  5.0795
+ ],
+ "exclusion_mm": 4.0,
+ "max_displacement_mm": 0.44851,
+ "max_displacement_at": [
+  0.0,
+  15.0,
+  40.0
+ ],
+ "displacement_vector_at_max": [
+  0.39176,
+  0.0,
+  0.21837
+ ],
+ "safety_factor_yield": 5.53,
+ "safety_factor_yield_raw_peak": 4.022,
+ "note": "max_von_mises_mpa/safety_factor_yield exclude nodes within exclusion_mm of constraint/load edges (singularities); the *_raw values include them. Linear static, small displacement, isotropic material.",
+ "plot_png": "/tmp/cad_mcp_demo_zj13lt9b/fem/bracket/bracket_vm.png"
+}
