@@ -213,4 +213,4 @@ def main():
     sys.stdout.flush()
 
 # operation modules register themselves on import
-from cad_mcp import ops_model, ops_analysis, ops_fem  # noqa: E402,F401
+from cad_mcp import ops_model, ops_analysis, ops_fem, ops_features, ops_docs  # noqa: E402,F401

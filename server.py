@@ -278,6 +278,131 @@ def run_fem(doc: str, name: str, fixed_faces: Faces, loads: list[dict], material
     return [_j(res), Image(data=p.read_bytes(), format="png")]
 
 
+# ============================================================================ sketches and features
+@mcp.tool()
+def create_sketch(doc: str, name: str, plane: Literal["XY", "XZ", "YZ"] = "XY", offset: float = 0.0, geometry: Optional[list[dict]] = None,
+                  constraints: Optional[list[dict]] = None) -> str:
+    """Create a 2D sketch (FreeCAD Sketcher with a real constraint solver). `plane` XY (x,y; normal +Z), XZ (sketch x,y map to
+    world x,z; normal -Y) or YZ (maps to world y,z; normal +X); `offset` shifts the plane along its normal.
+    geometry items (sketch coordinates in mm; index = position in the list, starting 0): {"type":"line","p1":[x,y],"p2":[x,y]},
+    {"type":"circle","center":[x,y],"radius":r}, {"type":"arc","center":[x,y],"radius":r,"start_deg":a,"end_deg":b} (counter-
+    clockwise), {"type":"polyline","points":[[x,y],...]} (closed polygon, expands to one line per side). Add "construction":true
+    for reference geometry. Closed loops become faces; a loop inside another becomes a hole.
+    constraints (optional, reference geometry by index `geo`/`geo2`, point ids pos 1=start, 2=end, 3=centre): coincident
+    (geo,pos,geo2,pos2), horizontal, vertical, parallel, perpendicular, equal, tangent, radius/diameter (geo,value), length
+    (geo,value), distance_x/distance_y (geo,value), lock (geo,pos,x,y). Returns closed/open wire counts and solver DOF (0 = fully
+    constrained). Next: pad, pocket, revolve, loft or sweep."""
+    return _j(run_worker("create_sketch", doc, name=name, plane=plane, offset=offset, geometry=geometry, constraints=constraints))
+
+
+@mcp.tool()
+def pad(doc: str, sketch: str, length: float, result_name: str, symmetric: bool = False, reverse: bool = False,
+        material: Optional[str] = None, color: Optional[Vec3] = None) -> str:
+    """Extrude the closed loops of a sketch by `length` mm along the sketch normal (XY +Z, XZ -Y, YZ +X; `reverse` flips it,
+    `symmetric` splits the length across the sketch plane) into a new solid `result_name`. Inner loops become holes."""
+    return _j(run_worker("pad", doc, sketch=sketch, length=length, result_name=result_name, symmetric=symmetric, reverse=reverse,
+                         material=material, color=color))
+
+
+@mcp.tool()
+def pocket(doc: str, sketch: str, target: str, depth: Optional[float] = None, through_all: bool = False, reverse: bool = False,
+           result_name: Optional[str] = None) -> str:
+    """Cut the sketch profile out of solid `target`. Cuts opposite to the sketch normal by default (`reverse` flips); `depth`
+    in mm, or `through_all`. Modifies `target` unless `result_name` is given. Place the sketch on or above the surface being cut."""
+    return _j(run_worker("pocket", doc, sketch=sketch, target=target, depth=depth, through_all=through_all, reverse=reverse, result_name=result_name))
+
+
+@mcp.tool()
+def revolve(doc: str, sketch: str, result_name: str, axis_point: Vec3 = [0, 0, 0], axis_dir: Vec3 = [0, 1, 0], angle_deg: float = 360.0,
+            material: Optional[str] = None) -> str:
+    """Revolve the sketch's closed profile about a world-space axis (point + direction) by `angle_deg`. The profile must not
+    cross the axis. Example: shaft profile in an XY sketch, axis_dir [1,0,0]."""
+    return _j(run_worker("revolve", doc, sketch=sketch, result_name=result_name, axis_point=axis_point, axis_dir=axis_dir,
+                         angle_deg=angle_deg, material=material))
+
+
+@mcp.tool()
+def loft(doc: str, sketches: list[str], result_name: str, ruled: bool = False, material: Optional[str] = None) -> str:
+    """Loft a solid through two or more closed sketch profiles in order (e.g. sketches on parallel planes with different
+    `offset`). `ruled` gives straight transitions instead of smooth ones."""
+    return _j(run_worker("loft", doc, sketches=sketches, result_name=result_name, ruled=ruled, material=material))
+
+
+@mcp.tool()
+def sweep(doc: str, profile_sketch: str, result_name: str, path_sketch: Optional[str] = None, path_points: Optional[list[Vec3]] = None,
+          frenet: bool = True, material: Optional[str] = None) -> str:
+    """Sweep a closed profile sketch along a path (a sketch of connected edges, or a 3D polyline `path_points`). The profile
+    should sit at the path start, roughly perpendicular to it. Use for pipes, rails and cable runs."""
+    return _j(run_worker("sweep", doc, profile_sketch=profile_sketch, result_name=result_name, path_sketch=path_sketch,
+                         path_points=path_points, frenet=frenet, material=material))
+
+
+@mcp.tool()
+def hole(doc: str, name: str, position: Vec3, direction: Vec3, diameter: float, depth: Optional[float] = None,
+         kind: Literal["simple", "counterbore", "countersink"] = "simple", cbore_diameter: Optional[float] = None,
+         cbore_depth: Optional[float] = None, csink_diameter: Optional[float] = None) -> str:
+    """Drill a hole into solid `name` (modified in place). `position` is the point on the surface where the hole starts,
+    `direction` points INTO the material (e.g. [0,0,-1] to drill down from a top face). `depth` None = through all.
+    kind counterbore needs cbore_diameter and cbore_depth; countersink needs csink_diameter (90 degree cone).
+    Fails if no material was removed. Find surface points with list_faces."""
+    return _j(run_worker("hole", doc, name=name, position=position, direction=direction, diameter=diameter, depth=depth, kind=kind,
+                         cbore_diameter=cbore_diameter, cbore_depth=cbore_depth, csink_diameter=csink_diameter))
+
+
+@mcp.tool()
+def shell(doc: str, name: str, thickness: float, remove_faces: Faces) -> str:
+    """Hollow out a solid leaving walls of `thickness` mm (inward), opening the faces in `remove_faces` (indices or a
+    face selector, see list_faces). Large thickness relative to features fails; the tool says so."""
+    return _j(run_worker("shell", doc, name=name, thickness=thickness, remove_faces=remove_faces))
+
+
+@mcp.tool()
+def mirror(doc: str, name: str, plane: Literal["XY", "XZ", "YZ"], result_name: str, plane_offset: float = 0.0, fuse: bool = False) -> str:
+    """Mirror an object across a world-aligned plane (XY mirrors Z, XZ mirrors Y, YZ mirrors X) at `plane_offset` mm along its
+    normal. With fuse=true the result is the union of the original and the mirror image."""
+    return _j(run_worker("mirror", doc, name=name, plane=plane, result_name=result_name, plane_offset=plane_offset, fuse=fuse))
+
+
+@mcp.tool()
+def linear_pattern(doc: str, name: str, direction: Vec3, count: int, spacing: float, result_name: str, fuse: bool = False) -> str:
+    """Repeat an object `count` times (including the original) every `spacing` mm along `direction`. fuse=false creates
+    objects result_name_1.. for the copies only (the original stays); fuse=true returns one solid with all instances.
+    Typical use: pattern a cylinder 'tool', then boolean cut it from a plate."""
+    return _j(run_worker("linear_pattern", doc, name=name, direction=direction, count=count, spacing=spacing, result_name=result_name, fuse=fuse))
+
+
+@mcp.tool()
+def polar_pattern(doc: str, name: str, count: int, result_name: str, axis: Vec3 = [0, 0, 1], center: Vec3 = [0, 0, 0],
+                  total_angle_deg: float = 360.0, fuse: bool = False) -> str:
+    """Rotate copies of an object about an axis through `center`: `count` instances spread over `total_angle_deg` (360 = full
+    circle, evenly spaced). Same fuse behaviour as linear_pattern. Use for bolt circles."""
+    return _j(run_worker("polar_pattern", doc, name=name, count=count, axis=axis, center=center, total_angle_deg=total_angle_deg,
+                         result_name=result_name, fuse=fuse))
+
+
+# ============================================================================ documentation
+@mcp.tool()
+def make_drawing(doc: str, objects: Optional[list[str]] = None, title: Optional[str] = None, sheet: Literal["A3", "A4"] = "A3",
+                 author: str = "", scale: Optional[float] = None, hidden_lines: bool = True) -> list:
+    """Make a third-angle engineering drawing (front, top, right, isometric) with hidden-line removal via TechDraw's
+    projection, overall dimensions on each orthographic view, diameter callouts for round holes seen face-on, and a title block
+    (title, material, mass, scale, date). Writes SVG, PDF and PNG into workspace/drawings/<doc>/ and returns the paths plus the
+    PNG as an image. `scale` is paper:model (e.g. 0.5); default picks a standard scale that fits."""
+    base = _out("drawings", doc, title.replace(" ", "_") if title else doc)
+    res = run_worker("make_drawing", doc, out_base=str(base), objects=objects, title=title, sheet=sheet, author=author, scale=scale,
+                     hidden=hidden_lines)
+    return [_j(res), Image(data=Path(res["png"]).read_bytes(), format="png")]
+
+
+@mcp.tool()
+def bom(doc: str, objects: Optional[list[str]] = None) -> str:
+    """Bill of materials from object metadata (set_properties: part_no, description, material, supplier, quantity). Identical
+    part_no+material+description lines are merged and quantities summed. Returns the rows and writes CSV and Markdown under
+    workspace/bom/<doc>/. Mass is volume x material density."""
+    base = _out("bom", doc, f"{doc}_bom")
+    return _j(run_worker("bom", doc, out_base=str(base), objects=objects))
+
+
 # ============================================================================ seeing the part
 @mcp.tool()
 def render_view(doc: str, view: Literal["iso", "front", "back", "top", "bottom", "right", "left", "grid"] = "iso",
