@@ -1,0 +1,12 @@
+[project]
+name = "freecad-engineering-mcp"
+version = "0.1.0"
+description = "A FreeCAD engineering MCP server: CAD modelling, mass/interference/FEM checks, drawings, BOM and renders over stdio."
+requires-python = ">=3.10"
+dependencies = ["mcp>=1.2,<2", "numpy", "matplotlib"]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
