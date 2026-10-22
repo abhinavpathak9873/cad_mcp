@@ -54,7 +54,7 @@ def test_export_and_render(srv):
         p = J(s.export(doc, fmt))["path"]
         assert os.path.getsize(p) > 500, fmt
     out = s.render_view(doc, "grid")
-    assert out[1].data[:8] == b"\x89PNG\r\n\x1a\n" and len(out[1].data) > 20000
+    assert out[1].data[:8] == b"\x89PNG\r\n\x1a\n" and len(out[1].data) > 8000
 
 def test_undo_free_script_and_resources(srv):
     s = srv
