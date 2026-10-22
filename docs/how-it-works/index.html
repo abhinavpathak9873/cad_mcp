@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How cad_mcp works: an AI driving FreeCAD, explained simply</title>
+<style>
+:root{
+  --bg:#f7f6f2; --card:#ffffff; --ink:#1d2330; --muted:#5d6577; --line:#e3e0d8;
+  --you:#7a5af8; --ai:#d9772b; --srv:#1f8a70; --fc:#2f6fdb; --file:#8a6d3b;
+  --code:#f1efe9; --radius:14px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:0 22px}
+header.hero{padding:64px 0 36px}
+.kicker{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:600}
+h1{font-size:44px;line-height:1.1;margin:10px 0 16px;letter-spacing:-.02em}
+h2{font-size:30px;line-height:1.2;margin:0 0 12px;letter-spacing:-.01em}
+h3{font-size:19px;margin:22px 0 6px}
+p.lead{font-size:20px;color:var(--muted);max-width:760px}
+section{padding:42px 0;border-top:1px solid var(--line)}
+.num{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:var(--ink);color:#fff;font-weight:700;font-size:15px;margin-right:10px;vertical-align:middle}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px 24px}
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:820px){.g2,.g3,.g4{grid-template-columns:1fr}h1{font-size:34px}}
+code,pre{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px}
+code{background:var(--code);padding:1px 6px;border-radius:6px}
+pre{background:#1d2330;color:#e7e9ee;padding:16px 18px;border-radius:12px;overflow:auto;line-height:1.5;margin:10px 0}
+pre .c{color:#8b93a7}.k{color:#ffb86b}.s{color:#9be29b}
+.tag{display:inline-block;font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px;color:#fff;margin-right:6px}
+.t-you{background:var(--you)}.t-ai{background:var(--ai)}.t-srv{background:var(--srv)}.t-fc{background:var(--fc)}.t-file{background:var(--file)}
+.analogy{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:18px}
+@media(max-width:820px){.analogy{grid-template-columns:1fr 1fr}}
+.who{border-radius:var(--radius);padding:18px;color:#fff}
+.who b{display:block;font-size:18px;margin-bottom:2px}
+.who small{display:block;opacity:.9;font-size:14px;line-height:1.45}
+.who .icon{font-size:30px;line-height:1;margin-bottom:8px}
+.callout{border-left:4px solid var(--srv);background:#eef7f3;padding:14px 18px;border-radius:0 12px 12px 0;margin:16px 0}
+.callout.warn{border-color:var(--ai);background:#fdf2e8}
+svg text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif}
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:10px;overflow:auto}
+.steps{counter-reset:s;list-style:none;padding:0;margin:0}
+.steps li{position:relative;padding:16px 18px 16px 64px;background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:10px}
+.steps li::before{counter-increment:s;content:counter(s);position:absolute;left:16px;top:16px;width:32px;height:32px;border-radius:50%;background:var(--ink);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:14px}
+.steps li .who-line{font-size:13px;margin-bottom:4px}
+img.shot{width:100%;border-radius:12px;border:1px solid var(--line);background:#fff}
+.cap{font-size:14px;color:var(--muted);margin-top:6px}
+.toolgroup h4{margin:0 0 6px;font-size:15px}
+.toolgroup p{margin:0;font-size:14px;color:var(--muted);line-height:1.55}
+nav.toc{position:sticky;top:0;z-index:5;background:rgba(247,246,242,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+nav.toc .wrap{display:flex;gap:18px;overflow:auto;padding-top:10px;padding-bottom:10px;font-size:14px;white-space:nowrap}
+nav.toc a{color:var(--muted);text-decoration:none}nav.toc a:hover{color:var(--ink)}
+.script{font-size:19px;line-height:1.7;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:24px 28px}
+.script p{margin:0 0 12px}
+dl.gloss dt{font-weight:700;margin-top:12px}dl.gloss dd{margin:2px 0 0;color:var(--muted)}
+footer{padding:40px 0 70px;color:var(--muted);font-size:14px;border-top:1px solid var(--line)}
+a{color:var(--fc)}
+/* animated packets on the big diagram */
+.packet{animation:move 7s linear infinite}
+@keyframes move{0%{offset-distance:0%}100%{offset-distance:100%}}
+.tabs{display:flex;gap:6px;margin:10px 0 0;flex-wrap:wrap}
+.tabs button{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:6px 14px;font-size:14px;cursor:pointer;color:var(--ink)}
+.tabs button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.msg{display:none}.msg.on{display:block}
+</style>
+</head>
+<body>
+
+<header class="hero wrap">
+  <div class="kicker">cad_mcp · how it works</div>
+  <h1>How an AI drives FreeCAD,<br>explained so anyone gets it</h1>
+  <p class="lead">An AI model can only read and write text. It cannot click buttons in FreeCAD. <b>cad_mcp</b> is a small program
+  that sits in between: it offers the AI a menu of CAD jobs, and when the AI picks one, it quietly runs FreeCAD in the
+  background to do it and reports the result back in text (or as a picture).</p>
+</header>
+
+<nav class="toc"><div class="wrap">
+  <a href="#cast">1. The four players</a><a href="#map">2. The big picture</a><a href="#menu">3. The menu</a>
+  <a href="#trip">4. One request, step by step</a><a href="#wire">5. What the messages look like</a>
+  <a href="#freecad">6. Inside the FreeCAD side</a><a href="#see">7. How the AI "sees"</a>
+  <a href="#memory">8. Where the model lives</a><a href="#tools">9. What it can do</a><a href="#explain">10. Explain it in 30 seconds</a>
+</div></nav>
+
+<!-- ================================================================== 1 -->
+<section id="cast"><div class="wrap">
+  <h2><span class="num">1</span>The four players</h2>
+  <p>Think of a restaurant. You order, a waiter takes the order, the kitchen cooks, and the food comes back on a plate.</p>
+  <div class="analogy">
+    <div class="who" style="background:var(--you)"><div class="icon">🧑</div><b>You</b><small>The customer. You say what you want in plain words: "make me an L-bracket that holds 300 N".</small></div>
+    <div class="who" style="background:var(--ai)"><div class="icon">🤖</div><b>The AI client</b><small>Claude Code, Codex, Claude Desktop. The waiter who understands you and decides which dishes to order from the kitchen.</small></div>
+    <div class="who" style="background:var(--srv)"><div class="icon">🧾</div><b>cad_mcp (the MCP server)</b><small>The order window. It has a printed menu of 45 CAD jobs and turns each order into instructions for the kitchen.</small></div>
+    <div class="who" style="background:var(--fc)"><div class="icon">⚙️</div><b>FreeCAD</b><small>The kitchen. The real CAD engine that builds solids, meshes, runs stress analysis and makes drawings. It never talks to the AI directly.</small></div>
+  </div>
+  <div class="callout"><b>MCP</b> (Model Context Protocol) is just the agreed format for the order slips between the waiter and the order window.
+  Because the format is standard, <i>any</i> AI client that speaks MCP can use <i>any</i> MCP server. It is the "USB plug" for AI tools.</div>
+</div></section>
+
+<!-- ================================================================== 2 -->
+<section id="map"><div class="wrap">
+  <h2><span class="num">2</span>The big picture</h2>
+  <p>Everything runs on one computer. The AI client starts cad_mcp as a child program and talks to it through two plain text pipes
+  (the program's input and output). For every job, cad_mcp starts a fresh, invisible copy of FreeCAD (<code>freecadcmd</code>),
+  hands it a job slip, and waits for a result slip.</p>
+  <div class="diagram">
+  <svg viewBox="0 0 1000 430" width="100%" role="img" aria-label="Diagram: You, AI client, cad_mcp server, FreeCAD, files">
+    <defs>
+      <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#5d6577"/></marker>
+    </defs>
+    <!-- boxes -->
+    <rect x="20" y="40" width="150" height="110" rx="14" fill="#7a5af8"/>
+    <text x="95" y="88" fill="#fff" font-size="30" text-anchor="middle">🧑</text>
+    <text x="95" y="122" fill="#fff" font-size="17" font-weight="700" text-anchor="middle">You</text>
+
+    <rect x="250" y="40" width="200" height="110" rx="14" fill="#d9772b"/>
+    <text x="350" y="78" fill="#fff" font-size="17" font-weight="700" text-anchor="middle">AI client</text>
+    <text x="350" y="100" fill="#fff" font-size="13" text-anchor="middle">Claude Code · Codex</text>
+    <text x="350" y="118" fill="#fff" font-size="13" text-anchor="middle">Claude Desktop · Cursor</text>
+    <text x="350" y="138" fill="#fff" font-size="12" opacity=".85" text-anchor="middle">the model decides what to do</text>
+
+    <rect x="530" y="40" width="200" height="110" rx="14" fill="#1f8a70"/>
+    <text x="630" y="78" fill="#fff" font-size="17" font-weight="700" text-anchor="middle">cad_mcp</text>
+    <text x="630" y="100" fill="#fff" font-size="13" text-anchor="middle">server.py (Python)</text>
+    <text x="630" y="118" fill="#fff" font-size="13" text-anchor="middle">menu of 45 tools</text>
+    <text x="630" y="138" fill="#fff" font-size="12" opacity=".85" text-anchor="middle">translates orders → jobs</text>
+
+    <rect x="810" y="40" width="170" height="110" rx="14" fill="#2f6fdb"/>
+    <text x="895" y="78" fill="#fff" font-size="17" font-weight="700" text-anchor="middle">FreeCAD</text>
+    <text x="895" y="100" fill="#fff" font-size="13" text-anchor="middle">freecadcmd</text>
+    <text x="895" y="118" fill="#fff" font-size="13" text-anchor="middle">(no window)</text>
+    <text x="895" y="138" fill="#fff" font-size="12" opacity=".85" text-anchor="middle">+ Gmsh + CalculiX</text>
+
+    <rect x="700" y="290" width="280" height="110" rx="14" fill="#fff" stroke="#8a6d3b" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="840" y="322" fill="#8a6d3b" font-size="16" font-weight="700" text-anchor="middle">📁 workspace/ (files on disk)</text>
+    <text x="840" y="346" fill="#1d2330" font-size="13" text-anchor="middle">bracket.FCStd  ← the actual 3D model</text>
+    <text x="840" y="366" fill="#1d2330" font-size="13" text-anchor="middle">.history/  ← old versions for undo</text>
+    <text x="840" y="386" fill="#1d2330" font-size="13" text-anchor="middle">renders/ drawings/ exports/ fem/</text>
+
+    <!-- arrows top row -->
+    <path id="p1" d="M170,95 L250,95" stroke="#5d6577" stroke-width="2.5" fill="none" marker-end="url(#ar)"/>
+    <path id="p2" d="M450,85 L530,85" stroke="#5d6577" stroke-width="2.5" fill="none" marker-end="url(#ar)"/>
+    <path d="M530,108 L450,108" stroke="#5d6577" stroke-width="2.5" fill="none" marker-end="url(#ar)"/>
+    <path d="M730,85 L810,85" stroke="#5d6577" stroke-width="2.5" fill="none" marker-end="url(#ar)"/>
+    <path d="M810,108 L730,108" stroke="#5d6577" stroke-width="2.5" fill="none" marker-end="url(#ar)"/>
+    <path d="M895,150 L895,290" stroke="#5d6577" stroke-width="2.5" fill="none" marker-end="url(#ar)" marker-start="url(#ar)"/>
+
+    <!-- labels under arrows -->
+    <text x="210" y="180" font-size="13" fill="#5d6577" text-anchor="middle">plain words</text>
+    <text x="490" y="180" font-size="13" fill="#5d6577" text-anchor="middle">MCP messages</text>
+    <text x="490" y="197" font-size="12" fill="#5d6577" text-anchor="middle">(JSON text through</text>
+    <text x="490" y="212" font-size="12" fill="#5d6577" text-anchor="middle">stdin / stdout pipes)</text>
+    <text x="770" y="180" font-size="13" fill="#5d6577" text-anchor="middle">job slip in,</text>
+    <text x="770" y="197" font-size="13" fill="#5d6577" text-anchor="middle">result slip out</text>
+    <text x="770" y="214" font-size="12" fill="#5d6577" text-anchor="middle">(job.json / result.json)</text>
+    <text x="912" y="225" font-size="13" fill="#5d6577">opens, edits,</text>
+    <text x="912" y="242" font-size="13" fill="#5d6577">saves the file</text>
+
+    <!-- bracket: what lives where -->
+    <rect x="20" y="290" width="640" height="110" rx="14" fill="#fff" stroke="#e3e0d8"/>
+    <text x="40" y="320" font-size="14" font-weight="700" fill="#1d2330">Who knows what</text>
+    <text x="40" y="344" font-size="13" fill="#1d2330">• The AI knows the <tspan font-weight="700">menu</tspan> and the <tspan font-weight="700">results</tspan>. It never sees FreeCAD or Python.</text>
+    <text x="40" y="366" font-size="13" fill="#1d2330">• cad_mcp knows <tspan font-weight="700">how</tspan> to turn each menu item into FreeCAD code. It has no opinions.</text>
+    <text x="40" y="388" font-size="13" fill="#1d2330">• FreeCAD knows <tspan font-weight="700">geometry</tspan>. The 3D model lives in a file, not in anyone's memory.</text>
+
+    <!-- moving packets -->
+    <circle r="7" fill="#d9772b" stroke="#fff" stroke-width="2"><animateMotion dur="3s" repeatCount="indefinite" path="M450,85 L530,85 L810,85"/></circle>
+    <circle r="7" fill="#2f6fdb" stroke="#fff" stroke-width="2"><animateMotion dur="3s" begin="1.5s" repeatCount="indefinite" path="M810,108 L730,108 L450,108"/></circle>
+  </svg>
+  </div>
+  <p class="cap">Orange dot: an order travelling to FreeCAD. Blue dot: the result coming back. cad_mcp and FreeCAD run only on your computer;
+  the AI provider (Anthropic, OpenAI) only sees the menu and the results, as part of the chat.</p>
+</div></section>
+
+<!-- ================================================================== 3 -->
+<section id="menu"><div class="wrap">
+  <h2><span class="num">3</span>First, the AI reads the menu</h2>
+  <p>When you open Claude Code (or Codex), it starts cad_mcp and asks one question: <b>"what can you do?"</b>
+  cad_mcp answers with its menu. Each item has a <b>name</b>, a <b>description written for the AI</b>, and a
+  <b>form to fill in</b> (which inputs it needs, and their types). That is all the AI ever learns about FreeCAD.</p>
+  <div class="grid g2">
+    <div>
+      <h3>How a menu item is written (in server.py)</h3>
+<pre><span class="k">@mcp.tool</span>()
+<span class="k">def</span> add_primitive(doc: str, name: str,
+        shape: Literal[<span class="s">"box"</span>,<span class="s">"cylinder"</span>,...],
+        dimensions: dict[str, float],
+        position: list[float] = None):
+    <span class="s">"""Add a primitive solid. dimensions keys:
+    box {length, width, height};
+    cylinder {radius, height} ..."""</span>
+    <span class="k">return</span> run_worker(<span class="s">"add_primitive"</span>, doc, ...)</pre>
+      <p class="cap">A normal Python function. The <code>@mcp.tool()</code> label puts it on the menu.</p>
+    </div>
+    <div>
+      <h3>What the AI actually receives</h3>
+<pre>{ <span class="s">"name"</span>: <span class="s">"add_primitive"</span>,
+  <span class="s">"description"</span>: <span class="s">"Add a primitive solid.
+     dimensions keys: box {length,
+     width, height}; cylinder ..."</span>,
+  <span class="s">"inputSchema"</span>: {
+    <span class="s">"properties"</span>: {
+      <span class="s">"doc"</span>:   {<span class="s">"type"</span>: <span class="s">"string"</span>},
+      <span class="s">"shape"</span>: {<span class="s">"enum"</span>: [<span class="s">"box"</span>,<span class="s">"cylinder"</span>,...]},
+      <span class="s">"dimensions"</span>: {<span class="s">"type"</span>: <span class="s">"object"</span>}, ...
+    }}}</pre>
+      <p class="cap">The MCP library turns the function's name, inputs and docstring into this automatically.</p>
+    </div>
+  </div>
+  <div class="callout warn"><b>Key idea:</b> the description is the AI's only manual. Good descriptions ("units are mm, +Z is up,
+  box origin is its corner") are the difference between an AI that builds the right part and one that guesses.</div>
+</div></section>
+
+<!-- ================================================================== 4 -->
+<section id="trip"><div class="wrap">
+  <h2><span class="num">4</span>One request, step by step</h2>
+  <p>You type: <i>"Make a 60 × 40 × 5 mm aluminium plate."</i> Here is everything that happens, in order. It takes about a second.</p>
+  <ol class="steps">
+    <li><div class="who-line"><span class="tag t-you">You</span>→<span class="tag t-ai">AI</span></div>
+      You type the request in plain words.</li>
+    <li><div class="who-line"><span class="tag t-ai">AI</span></div>
+      The model looks at the menu and decides: the right item is <code>add_primitive</code>, with shape <code>box</code>,
+      length 60, width 40, height 5, material <code>aluminium 6061</code>. It fills in the form.</li>
+    <li><div class="who-line"><span class="tag t-ai">AI</span>→<span class="tag t-srv">cad_mcp</span></div>
+      Claude Code writes one line of JSON (a <code>tools/call</code> message) into cad_mcp's input pipe.</li>
+    <li><div class="who-line"><span class="tag t-srv">cad_mcp</span></div>
+      cad_mcp copies the current model file into <code>.history/</code> (so you can undo), then writes a <b>job slip</b>
+      (<code>job.json</code>: "do add_primitive on bracket.FCStd with these numbers") and a three-line starter script.</li>
+    <li><div class="who-line"><span class="tag t-srv">cad_mcp</span>→<span class="tag t-fc">FreeCAD</span></div>
+      It launches <code>freecadcmd job.py</code>: a copy of FreeCAD with no window. Like double-clicking FreeCAD, but invisible.</li>
+    <li><div class="who-line"><span class="tag t-fc">FreeCAD</span>→<span class="tag t-file">file</span></div>
+      Inside FreeCAD, the worker opens <code>bracket.FCStd</code>, runs <code>Part.makeBox(60, 40, 5)</code>, tags it with its
+      material, and saves the file.</li>
+    <li><div class="who-line"><span class="tag t-fc">FreeCAD</span>→<span class="tag t-srv">cad_mcp</span></div>
+      It writes a <b>result slip</b> (<code>result.json</code>: "ok, volume 12 000 mm³, bounding box …") and exits.
+      FreeCAD is now closed again.</li>
+    <li><div class="who-line"><span class="tag t-srv">cad_mcp</span>→<span class="tag t-ai">AI</span></div>
+      cad_mcp reads the slip and sends it back up the output pipe as the answer to the AI's message.</li>
+    <li><div class="who-line"><span class="tag t-ai">AI</span>→<span class="tag t-you">You</span></div>
+      The model reads the numbers, maybe calls more tools (add holes, render, check mass), then tells you what it did.</li>
+  </ol>
+  <div class="callout">If FreeCAD crashes or hangs on a job, only that one throwaway copy dies. cad_mcp reports an error to the AI,
+  the model file on disk is untouched, and the AI can try something else.</div>
+</div></section>
+
+<!-- ================================================================== 5 -->
+<section id="wire"><div class="wrap">
+  <h2><span class="num">5</span>What the messages actually look like</h2>
+  <p>MCP messages are small JSON texts, one per line. There are only a handful of message types. Click through the conversation:</p>
+  <div class="tabs" id="tabs">
+    <button class="on" data-m="m1">1 · hello</button><button data-m="m2">2 · menu?</button>
+    <button data-m="m3">3 · do this</button><button data-m="m4">4 · done</button><button data-m="m5">5 · show me</button>
+  </div>
+  <div class="msg on" id="m1">
+<pre><span class="c">// AI client → cad_mcp: "Hi, I speak MCP version 2025-06-18"</span>
+{"jsonrpc":"2.0","id":1,"method":"initialize",
+ "params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"claude-code"}}}
+
+<span class="c">// cad_mcp → AI client: "Hi, I'm cad_mcp, I have tools, resources and prompts"</span>
+{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"cad_mcp"},
+ "capabilities":{"tools":{},"resources":{},"prompts":{}}}}</pre>
+  </div>
+  <div class="msg" id="m2">
+<pre><span class="c">// AI client → cad_mcp: "what's on the menu?"</span>
+{"jsonrpc":"2.0","id":2,"method":"tools/list"}
+
+<span class="c">// cad_mcp → AI client: 45 menu items (one shown)</span>
+{"jsonrpc":"2.0","id":2,"result":{"tools":[
+  {"name":"add_primitive","description":"Add a primitive solid...","inputSchema":{...}},
+  {"name":"run_fem","description":"Linear static stress analysis...","inputSchema":{...}},
+  ... ]}}</pre>
+  </div>
+  <div class="msg" id="m3">
+<pre><span class="c">// AI client → cad_mcp: "please call add_primitive with these inputs"</span>
+{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{
+  "name":"add_primitive",
+  "arguments":{"doc":"bracket","name":"Plate","shape":"box",
+               "dimensions":{"length":60,"width":40,"height":5},
+               "material":"aluminium 6061"}}}</pre>
+  </div>
+  <div class="msg" id="m4">
+<pre><span class="c">// cad_mcp → AI client: the result, as text the model can read</span>
+{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":
+  "{ \"name\": \"Plate\", \"valid\": true, \"volume_mm3\": 12000.0,
+     \"bbox\": [0,0,0, 60,40,5], \"material\": \"aluminium 6061\" }"}]}}
+
+<span class="c">// The "id":7 matches the request, so the client knows which call this answers.</span></pre>
+  </div>
+  <div class="msg" id="m5">
+<pre><span class="c">// Results can also be pictures. render_view returns a PNG the model can look at:</span>
+{"jsonrpc":"2.0","id":9,"result":{"content":[
+  {"type":"text","text":"saved workspace/renders/bracket/iso.png"},
+  {"type":"image","mimeType":"image/png","data":"iVBORw0KGgoAAAANSUhEUgAA..."}]}}</pre>
+  </div>
+  <p class="cap">This is the whole protocol for tools. The repo's <code>client_raw.py</code> sends exactly these lines by hand,
+  with no AI involved, so you can watch them scroll past.</p>
+</div></section>
+
+<!-- ================================================================== 6 -->
+<section id="freecad"><div class="wrap">
+  <h2><span class="num">6</span>Inside the FreeCAD side</h2>
+  <p>cad_mcp is split in two halves that never share memory. They only pass files to each other.</p>
+  <div class="diagram">
+  <svg viewBox="0 0 1000 300" width="100%" role="img" aria-label="Server half and worker half">
+    <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="#5d6577"/></marker></defs>
+    <rect x="20" y="20" width="400" height="260" rx="14" fill="#eef7f3" stroke="#1f8a70" stroke-width="2"/>
+    <text x="40" y="52" font-size="17" font-weight="700" fill="#1f8a70">Half 1: server.py</text>
+    <text x="40" y="74" font-size="13" fill="#5d6577">normal Python, runs the whole session</text>
+    <text x="40" y="108" font-size="14" fill="#1d2330">• the menu (45 @mcp.tool functions)</text>
+    <text x="40" y="132" font-size="14" fill="#1d2330">• talks MCP to the AI (via the MCP library)</text>
+    <text x="40" y="156" font-size="14" fill="#1d2330">• run_worker(): writes job slip, starts FreeCAD,</text>
+    <text x="52" y="176" font-size="14" fill="#1d2330">waits (max 240 s), reads result slip</text>
+    <text x="40" y="200" font-size="14" fill="#1d2330">• undo history, timeouts, error messages</text>
+    <text x="40" y="224" font-size="14" fill="#1d2330">• draws pictures (renders, stress plots)</text>
+    <text x="40" y="258" font-size="13" fill="#5d6577">cannot "import FreeCAD": it doesn't need to</text>
+
+    <rect x="580" y="20" width="400" height="260" rx="14" fill="#edf3fd" stroke="#2f6fdb" stroke-width="2"/>
+    <text x="600" y="52" font-size="17" font-weight="700" fill="#2f6fdb">Half 2: cad_mcp/ worker</text>
+    <text x="600" y="74" font-size="13" fill="#5d6577">runs inside FreeCAD's own Python, one job, then exits</text>
+    <text x="600" y="108" font-size="14" fill="#1d2330">• core.py: open file → run ONE operation → save</text>
+    <text x="600" y="132" font-size="14" fill="#1d2330">• ops_model.py: boxes, booleans, fillets...</text>
+    <text x="600" y="156" font-size="14" fill="#1d2330">• ops_features.py: sketches, pads, holes...</text>
+    <text x="600" y="180" font-size="14" fill="#1d2330">• ops_fem.py: mesh (Gmsh) + solve (CalculiX)</text>
+    <text x="600" y="204" font-size="14" fill="#1d2330">• ops_docs.py: TechDraw drawings, BOM</text>
+    <text x="600" y="228" font-size="14" fill="#1d2330">• ops_assembly.py, ops_analysis.py ...</text>
+    <text x="600" y="258" font-size="13" fill="#5d6577">this is where real FreeCAD API calls happen</text>
+
+    <path d="M420,120 L580,120" stroke="#5d6577" stroke-width="2.5" marker-end="url(#ar2)"/>
+    <text x="500" y="108" font-size="13" text-anchor="middle" fill="#1d2330">job.json</text>
+    <path d="M580,190 L420,190" stroke="#5d6577" stroke-width="2.5" marker-end="url(#ar2)"/>
+    <text x="500" y="178" font-size="13" text-anchor="middle" fill="#1d2330">result.json</text>
+    <text x="500" y="226" font-size="12" text-anchor="middle" fill="#5d6577">(+ STL, SVG, PNG files</text>
+    <text x="500" y="242" font-size="12" text-anchor="middle" fill="#5d6577">for pictures and exports)</text>
+  </svg>
+  </div>
+  <div class="grid g2" style="margin-top:16px">
+    <div>
+      <h3>The job slip (what cad_mcp writes)</h3>
+<pre>{ <span class="s">"op"</span>: <span class="s">"add_primitive"</span>,
+  <span class="s">"doc"</span>: <span class="s">"workspace/bracket.FCStd"</span>,
+  <span class="s">"args"</span>: {<span class="s">"name"</span>: <span class="s">"Plate"</span>, <span class="s">"shape"</span>: <span class="s">"box"</span>,
+           <span class="s">"dimensions"</span>: {...}},
+  <span class="s">"result"</span>: <span class="s">"/tmp/fcmcp_x/result.json"</span> }</pre>
+    </div>
+    <div>
+      <h3>The FreeCAD code that runs (ops_model.py)</h3>
+<pre><span class="k">@op</span>(<span class="s">"add_primitive"</span>)
+<span class="k">def</span> add_primitive(doc, name, shape, dimensions, ...):
+    <span class="k">if</span> shape == <span class="s">"box"</span>:
+        s = Part.makeBox(d[<span class="s">"length"</span>], d[<span class="s">"width"</span>],
+                         d[<span class="s">"height"</span>])
+    ...
+    o = add_shape(doc, name, s, material)
+    <span class="k">return</span> describe(o)   <span class="c"># volume, bbox, ...</span></pre>
+    </div>
+  </div>
+  <div class="callout"><b>Why start a fresh FreeCAD for every job?</b> It is simpler and safer. A long-running FreeCAD can crash,
+  leak memory, or end up in a weird state. A fresh one per job always starts clean. The cost is about a second of start-up time per call.</div>
+</div></section>
+
+<!-- ================================================================== 7 -->
+<section id="see"><div class="wrap">
+  <h2><span class="num">7</span>How the AI "sees" the part</h2>
+  <p>Numbers alone can hide mistakes (a hole on the wrong face still has the right volume). So there is a
+  <code>render_view</code> tool: FreeCAD exports the shape as triangles, cad_mcp draws them into a PNG, and the PNG goes
+  back to the AI as an image. Modern models can look at images, so the AI checks its own work the way you would.</p>
+  <div class="grid g2">
+    <div><img class="shot" src="img/step1_grid.png" alt="Four-view render of an L-bracket"><div class="cap">What the AI gets back from <code>render_view(view="grid")</code>: iso, front, top and side.</div></div>
+    <div><img class="shot" src="img/step2_drawing.png" alt="Technical drawing"><div class="cap"><code>make_drawing</code> runs FreeCAD's TechDraw to produce a real engineering drawing (SVG/PDF).</div></div>
+  </div>
+  <div class="diagram" style="margin-top:16px">
+  <svg viewBox="0 0 1000 120" width="100%">
+    <defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="#5d6577"/></marker></defs>
+    <g font-size="14" text-anchor="middle">
+      <rect x="10" y="30" width="170" height="60" rx="12" fill="#2f6fdb"/><text x="95" y="57" fill="#fff" font-weight="700">FreeCAD</text><text x="95" y="76" fill="#fff" font-size="12">solid → triangles (STL)</text>
+      <rect x="270" y="30" width="200" height="60" rx="12" fill="#1f8a70"/><text x="370" y="57" fill="#fff" font-weight="700">cad_mcp render.py</text><text x="370" y="76" fill="#fff" font-size="12">shade triangles → PNG</text>
+      <rect x="560" y="30" width="190" height="60" rx="12" fill="#d9772b"/><text x="655" y="57" fill="#fff" font-weight="700">AI looks at it</text><text x="655" y="76" fill="#fff" font-size="12">"hole is on the wrong face"</text>
+      <rect x="840" y="30" width="150" height="60" rx="12" fill="#1d2330"/><text x="915" y="57" fill="#fff" font-weight="700">fixes it</text><text x="915" y="76" fill="#fff" font-size="12">calls more tools</text>
+    </g>
+    <path d="M180,60 L270,60" stroke="#5d6577" stroke-width="2.5" marker-end="url(#ar3)"/>
+    <path d="M470,60 L560,60" stroke="#5d6577" stroke-width="2.5" marker-end="url(#ar3)"/>
+    <path d="M750,60 L840,60" stroke="#5d6577" stroke-width="2.5" marker-end="url(#ar3)"/>
+  </svg>
+  </div>
+</div></section>
+
+<!-- ================================================================== 8 -->
+<section id="memory"><div class="wrap">
+  <h2><span class="num">8</span>Where the model lives (and how undo works)</h2>
+  <div class="grid g3">
+    <div class="card"><h3 style="margin-top:0">📁 The file is the truth</h3><p>The part is a normal FreeCAD file,
+      <code>workspace/bracket.FCStd</code>. You can open it in the FreeCAD app at any time and see exactly what the AI built.</p></div>
+    <div class="card"><h3 style="margin-top:0">🕘 Undo = old copies</h3><p>Before any change, cad_mcp copies the file into
+      <code>.history/bracket/0007.FCStd</code>. <code>undo</code> just copies the previous one back. The last 20 versions are kept.</p></div>
+    <div class="card"><h3 style="margin-top:0">🧠 The AI remembers nothing</h3><p>The AI doesn't hold the geometry in its head.
+      It asks (<code>list_objects</code>, <code>list_faces</code>, <code>render_view</code>) whenever it needs to know the current state.</p></div>
+  </div>
+</div></section>
+
+<!-- ================================================================== 9 -->
+<section id="tools"><div class="wrap">
+  <h2><span class="num">9</span>What's on the menu</h2>
+  <p>45 tools, plus two read-only <b>resources</b> (the list of documents, the material table) and one <b>prompt</b>
+  (a ready-made "design and validate a bracket" recipe). Those are the three kinds of things an MCP server can offer.</p>
+  <div class="grid g3">
+    <div class="card toolgroup"><h4>📄 Documents</h4><p>new_document, list_documents, list_objects, delete_object, set_properties, undo / history</p></div>
+    <div class="card toolgroup"><h4>🧱 Basic shapes</h4><p>add_primitive (box, cylinder, sphere, cone, torus), extrude_polygon, boolean (cut, join, intersect), transform, fillet, chamfer</p></div>
+    <div class="card toolgroup"><h4>✏️ Sketch features</h4><p>create_sketch, pad, pocket, revolve, loft, sweep, hole (incl. counterbore), shell, mirror, linear / polar pattern</p></div>
+    <div class="card toolgroup"><h4>🔍 Finding things</h4><p>list_faces, list_edges, with selectors like <code>normal:+Z z:max</code> so the AI can say "the top face" instead of guessing a number</p></div>
+    <div class="card toolgroup"><h4>⚖️ Checks</h4><p>mass_properties (mass, centre of mass, inertia), check_interference (do parts overlap?), clearance, section views</p></div>
+    <div class="card toolgroup"><h4>🧪 Stress analysis</h4><p>run_fem: fix some faces, push on others, get max stress, max bend and the safety factor, plus a coloured stress picture</p></div>
+    <div class="card toolgroup"><h4>📐 Paperwork</h4><p>make_drawing (TechDraw views + title block), bom (parts list as CSV / Markdown)</p></div>
+    <div class="card toolgroup"><h4>🔩 Assemblies</h4><p>multiple parts, standard screws / nuts / washers by size, STEP parts library, exploded views</p></div>
+    <div class="card toolgroup"><h4>📤 Export & escape hatch</h4><p>export (STEP, STL, 3MF, OBJ, DXF, FCStd), import_step, render_view, run_script for anything not on the menu</p></div>
+  </div>
+  <p class="cap">Assemblies, fasteners, the parts library, clearance, section views, DXF and undo are being added now (step 3)
+  and land in the repo as they pass their tests.</p>
+</div></section>
+
+<!-- ================================================================== 10 -->
+<section id="explain"><div class="wrap">
+  <h2><span class="num">10</span>Explain it to anyone in 30 seconds</h2>
+  <div class="script">
+    <p>"An AI can only read and write text, so it can't use CAD software directly."</p>
+    <p>"So we wrote a small program, an <b>MCP server</b>, that sits next to FreeCAD. It hands the AI a menu: <i>make a box,
+    drill a hole, check the weight, test the strength, draw it</i>. Each item says what inputs it needs."</p>
+    <p>"When the AI picks something, the server writes it on a slip, opens an invisible copy of FreeCAD, which does the real
+    work on the actual CAD file, and passes the result back as text, or even as a picture the AI can look at."</p>
+    <p>"MCP is just the standard format for those slips, so the same server works with Claude, Codex, Cursor, anything."</p>
+  </div>
+  <h3>Words worth knowing</h3>
+  <dl class="gloss">
+    <dt>MCP (Model Context Protocol)</dt><dd>The standard way AI apps talk to tool programs. Like USB, but for AI tools.</dd>
+    <dt>MCP client</dt><dd>The AI app (Claude Code, Codex, Claude Desktop). It starts the server and sends it requests.</dd>
+    <dt>MCP server</dt><dd>The tool program (cad_mcp). It offers tools, resources and prompts.</dd>
+    <dt>Tool</dt><dd>One menu item the AI can call, with typed inputs and a description.</dd>
+    <dt>JSON-RPC</dt><dd>The message format: small JSON texts with a method name, inputs, and an id to match answers to questions.</dd>
+    <dt>stdio</dt><dd>"Standard input/output": the two text pipes every program has. The client writes to the server's input and reads its output.</dd>
+    <dt>freecadcmd</dt><dd>FreeCAD without a window. Same engine, run from scripts.</dd>
+    <dt>FEM</dt><dd>Finite element method: splits the part into thousands of tiny pieces (Gmsh) and computes how it bends and where it is stressed (CalculiX).</dd>
+  </dl>
+</div></section>
+
+<footer><div class="wrap">
+  Code: <a href="https://github.com/abhinavpathak9873/cad_mcp">github.com/abhinavpathak9873/cad_mcp</a> ·
+  read <code>server.py</code> top to bottom for the commented version of everything on this page.
+</div></footer>
+
+<script>
+document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x===b));
+  document.querySelectorAll('.msg').forEach(m=>m.classList.toggle('on',m.id===b.dataset.m));
+});
+</script>
+</body>
+</html>
